@@ -329,6 +329,7 @@ local function try_open()
 		end
 		-- Goes to line of search_entry
 		micro.CurPane():GotoCmd({ty})
+		return true
 		
 		--local cursor = search_target:GetActiveCursor()
 		--cursor:GotoLoc({X=1, Y=y})
