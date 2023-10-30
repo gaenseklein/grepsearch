@@ -24,4 +24,8 @@ it opens up a pane with the search-result. you can use up- and down-arrow to sel
 at first it will split the current pane verticaly and opens the file in this pane,
 once a pane is opened grepsearch will reuse this pane to open selected entrys afterwards.
 
-close search-pane with `ctrl-q`
+close search-pane with `ctrl-q` or `Escape`
+
+for more help see [>help grepsearch](help/grepsearch.md)
+
+![](screenshot.png)
