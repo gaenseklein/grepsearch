@@ -24,20 +24,30 @@ local searchsymend = "⇚"
 
 
 -- constructs a new search entry
+-- filepath, linenr, linetext, searchterm: string
 local function new_search_entry(filepath, linenr, linetext, searchterm)
 	local pos = string.find(linetext,searchterm)
+	local max = search_view:GetView().Width - #linenr - 4 --4 is for ': ' and the 2 markers 
 	--local length = string.len(linetext)
 	-- lets shorten the text as grep can produce very big results
-	-- first cut off all whitespaces to left:
 	local text = linetext --string.sub(linetext, string.find(linetext, '%S'))
-	while(string.sub(text,1,1)==' ') do text = string.sub(text,2) end	
-	-- cutting from left to search term:
-	if #text > 47 then 
-		text = '...' .. string.sub(linetext,pos)
+	local firstl = string.sub(text,1,1)
+	local cutted = 0
+	-- first cut off all whitespaces to left, because they are annoying
+	while firstl ==' ' or firstl == '\t' do 
+		text = string.sub(text,2) 
+		firstl = string.sub(text,1,1)
+		cutted = cutted + 1
+	end	
+	-- cutting from left to search term to make searchterm visible:
+	if pos - cutted > max - #searchterm - 2 then 
+		--local cuttedpos = pos - cutted 
+		local cutpos = (pos - cutted - max) + ((max - max % 2) / 2)
+		text = '(...)' .. string.sub(linetext,cutpos)
 	end
-	-- cutting right 
-	if #text > 47 then
-		text = string.sub(text, 1, 43) .. '...'
+	-- cutting right to avoid huuuuge lines
+	if #text > max*10 then
+		text = string.sub(text, 1, max*10) .. '(...)'
 	end
 	local sstart, ssend = string.find(text,searchterm)
 	text = string.sub(text,1,sstart-1)..searchsymstart..searchterm..searchsymend..string.sub(text,ssend+1)
@@ -109,7 +119,20 @@ local function parse_grep_result(grep_result, searchterm)
 	return result
 end
 
--- performs the whole search
+-- programmaticaly search
+local function programmaticaly_search(term)
+	local searchterm = term 
+	if searchterm == nil then searchterm = search_term end
+	if searchterm == nil then return end
+	local grep_result = grep_exec(searchterm)
+	local parsed_search = parse_grep_result(grep_result,searchterm)
+	--show some feedback on info-bar:
+	micro.InfoBar():Message('search for ' .. searchterm .. "  " .. #parsed_search .. " results")
+	-- show results in search_pane:		
+	display_grepsearch(parsed_search, searchterm)
+end
+
+-- user starts a search
 function grep_search(bp, args)
 	--open up search_result pane if not open yet:
 	toggle_tree(true)
@@ -126,6 +149,7 @@ function grep_search(bp, args)
 	micro.InfoBar():Message('search for ' .. searchterm .. "  " .. #parsed_search .. " results")
 	-- show results in search_pane:		
 	display_grepsearch(parsed_search, searchterm)
+	search_term = searchterm
 end
 
 --~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -147,15 +171,20 @@ local function display_filter(linenr)
 	end
 	res = res .. "#include hidden files:"..boolstring(include_dots).."\n"
 	filteraction[actline] = "hidden"
-	actline = actline + 1
+	actline = actline + 1	
 	return res, actline
 end
 
 local function try_change_filter()
-	local y = search_view.Cursor.Loc.Y + 1
-	if filteraction[y]==nil then return false end
+	local y = search_view.Cursor.Loc.Y 
+	if filteraction[y]==nil then 
+		micro.TermError('filteraction is nil',y,"filteraction.length:"..#filteraction)
+		return false 
+	end
 	if filteraction[y]==".gitignore" then use_git = not use_git end
 	if filteraction[y]=="hidden" then include_dots = not include_dots end
+--	micro.TermError('gi:'..boolstring(use_git),186,'hidden:'..boolstring(include_dots))
+	programmaticaly_search()
 	return true
 end
 
@@ -204,7 +233,12 @@ function display_grepsearch(search_result, searchterm, grep_result)
 		search_view.Buf.EventHandler:Insert(buffer.Loc(0, ii), display_content)
 		search_mapping_lines[ii]=search_result[i]
 	end
-
+	if #search_result == 0 then
+		ii = ii+1
+		display_content = "\nno matches found\n"
+		search_view.Buf.EventHandler:Insert(buffer.Loc(0, ii), display_content)		
+		ii = ii+2
+	end
 	-- debug:
 	-- if grep_result ~= nil then
 		-- search_view.Buf.EventHandler:Insert(buffer.Loc(0, 20), grep_result)
@@ -222,6 +256,8 @@ function display_grepsearch(search_result, searchterm, grep_result)
 
 	-- Resizes all views after messing with ours
     search_view:Tab():Resize()
+    -- go to first search entry
+	search_view:GotoCmd({"4"})
 
 end
 
@@ -242,7 +278,7 @@ local function open_tree()
 	-- Set the various display settings, but only on our view (by using SetLocalOption instead of SetOption)
 	-- NOTE: Micro requires the true/false to be a string
 	-- Softwrap long strings (the file/dir paths)
-    search_view.Buf:SetOptionNative("softwrap", true)
+    search_view.Buf:SetOptionNative("softwrap", false)
     -- No line numbering
     search_view.Buf:SetOptionNative("ruler", false)
     -- Is this needed with new non-savable settings from being "vtLog"?
@@ -429,6 +465,13 @@ function onCursorDown(view)
 	selectline_if_tree(view)
 end
 
+function onEscape(view)
+	if view ~= search_view then
+		return true
+	end
+	close_tree()
+end
+
 -- exclude all keystrokes on search result pane:
 function preRune(view, r)
 	if view ~= search_view then 
@@ -442,7 +485,7 @@ function preInsertNewline(view)
     if view == search_view then
     	local openedfile = try_open()
     	if not openedfile then 
-			
+			try_change_filter()			
     	end
         return false
     end
