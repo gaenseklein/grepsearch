@@ -16,20 +16,31 @@ local search_view = nil
 local target_buff = nil
 local target_pane
 -- Keeps track of the current working directory
-local current_dir = os.Getwd()
+local current_dir = ""
+
+local inside_git = false 
+local searchsymstart = "⇛"
+local searchsymend = "⇚"
 
 
 -- constructs a new search entry
 local function new_search_entry(filepath, linenr, linetext, searchterm)
 	local pos = string.find(linetext,searchterm)
-	local length = string.len(linetext)
-	local text = linetext
-	if length > 50 then 
+	--local length = string.len(linetext)
+	-- lets shorten the text as grep can produce very big results
+	-- first cut off all whitespaces to left:
+	local text = linetext --string.sub(linetext, string.find(linetext, '%S'))
+	while(string.sub(text,1,1)==' ') do text = string.sub(text,2) end	
+	-- cutting from left to search term:
+	if #text > 47 then 
 		text = '...' .. string.sub(linetext,pos)
 	end
-	if string.len(text) > 50 then
-		text = string.sub(text, 1, 45) .. '...'
+	-- cutting right 
+	if #text > 47 then
+		text = string.sub(text, 1, 43) .. '...'
 	end
+	local sstart, ssend = string.find(text,searchterm)
+	text = string.sub(text,1,sstart-1)..searchsymstart..searchterm..searchsymend..string.sub(text,ssend+1)
 	return {
 		path = filepath,
 		line = linenr,
@@ -38,32 +49,56 @@ local function new_search_entry(filepath, linenr, linetext, searchterm)
 	}
 end
 
+-- filter:
+local includegit = false --= config.GetGlobalOption("grepsearch.searchdotgit")
+local include_dots = true --config.GetGlobalOption("grepsearch.searchdotfiles")
+local use_git = true --config.GetGlobalOption("grepsearch.searchgitrepository")
+local show_filter = true
 
  
 local function grep_exec(searchterm)
-	local grep_result, grep_error = shell.RunCommand('grep -rnI "' .. searchterm .. '"')	
+	-- standard-command: exclude .git-directory 
+	local runCommand = 'grep -rnI --exclude-dir=.git "' .. searchterm .. '"'
+	-- if user wants to search inside .git also
+	if includegit then runCommand = 'grep -rnI "' .. searchterm .. '"' end
+	-- if user does not want to search in hidden files
+	if not include_dots then runCommand = 'grep -rnI --exclude=\'.*\' --exclude-dir=\'.*\' "' .. searchterm .. '"' end
+	-- if inside repo and user prefers git use git instead
+	-- local git_tree = shell.RunCommand('git rev-parse --is-inside-work-tree')
+	if inside_git and use_git then
+		runCommand = 'git grep -rnI "' .. searchterm .. '"'
+	end
+--	micro.TermError("runCommand",56,runCommand ..' << usegit:'.. boolstring(use_git) .. 'inside_git' .. boolstring(inside_git))
+	-- run the command
+	-- TODO: as it can endure a while we should give visual feedback maybe that we are still searching?
+	micro.InfoBar():Message('grepsearch command:' .. runCommand)
+	local grep_result, grep_error = shell.RunCommand(runCommand)	
 	return grep_result
 end
 
 
 local function parse_grep_result(grep_result, searchterm)
+	--parse all grep-result in one go
 	local line = 0
 	local linetext = ""
 	local filepath = ""
 	local linenr = ""
 	local startpos = 1
+	-- end of line:
 	local endpos = string.find(grep_result,'\n',startpos)
+	-- first : marks separation of filename (1->filepos)
 	local filepos = string.find(grep_result,':',startpos)
+	-- if we dont find filepos its an empty result, grep did not find anything
 	if filepos == nil then return {} end
+	-- linepos marks separation of line-number of result (filepos -> linepos)
 	local linepos = string.find(grep_result,':',filepos+1)
 	
 	local result = {}
 	while endpos~=nil do		
 		line = line + 1
 		filepath = string.sub(grep_result,startpos,filepos-1)
-		linetext = string.sub(grep_result, linepos+1, endpos -1)		
 		linenr = string.sub(grep_result,filepos+1,linepos-1)		
-		--linetext = '->'..linetext .. '||'.. startpos .. ',' .. filepos .. ',' .. linepos ..','..endpos
+		linetext = string.sub(grep_result, linepos+1, endpos -1)				
 		result[line] = new_search_entry(filepath, linenr, linetext, searchterm)
 		
 		startpos = endpos + 1
@@ -76,30 +111,67 @@ end
 
 -- performs the whole search
 function grep_search(bp, args)
+	--open up search_result pane if not open yet:
 	toggle_tree(true)
 	if #args < 1 then 
+		-- we dont want to perform empty searches:
 		close_tree()
 		return
 	end
+	
 	local searchterm = args[1]
 	local grep_result = grep_exec(searchterm)
 	local parsed_search = parse_grep_result(grep_result,searchterm)
-	micro.InfoBar():Error('search for ' .. searchterm .. "  " .. #parsed_search .. " results")
-	--refresh view:	
-	--display_search(parsed_search,searchterm)
+	--show some feedback on info-bar:
+	micro.InfoBar():Message('search for ' .. searchterm .. "  " .. #parsed_search .. " results")
+	-- show results in search_pane:		
 	display_grepsearch(parsed_search, searchterm)
 end
 
+--~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--filter
+--~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+local filteraction = {}
+
+local function display_filter(linenr)
+	-- local includegit = config.GetGlobalOption("grepsearch.searchdotgit")
+	-- local include_dots = config.GetGlobalOption("grepsearch.searchdotfiles")
+	-- local use_git = config.GetGlobalOption("grepsearch.searchgitrepository")
+	filteraction = {}
+	local actline = linenr
+	local res = "############\n"
+	if inside_git then 
+		res = res .. "#.gitignore:"..boolstring(use_git).."\n" 
+		filteraction[actline] = ".gitignore"
+		actline = actline + 1 
+	end
+	res = res .. "#include hidden files:"..boolstring(include_dots).."\n"
+	filteraction[actline] = "hidden"
+	actline = actline + 1
+	return res, actline
+end
+
+local function try_change_filter()
+	local y = search_view.Cursor.Loc.Y + 1
+	if filteraction[y]==nil then return false end
+	if filteraction[y]==".gitignore" then use_git = not use_git end
+	if filteraction[y]=="hidden" then include_dots = not include_dots end
+	return true
+end
+
+
 function display_grepsearch(search_result, searchterm, grep_result)
+	-- i copied most code from filemanager plugin and adapted to my needs
 	search_mapping_lines = {}
 	-- Delete everything in the view/buffer
 	search_view.Buf.EventHandler:Remove(search_view.Buf:Start(), search_view.Buf:End())
 
 	-- Insert the top 3 things that are always there
 	-- Current dir
+	--local cd = "~/grepsearch"
 	search_view.Buf.EventHandler:Insert(buffer.Loc(0, 0), "#search for \""..searchterm .. "\" in "..current_dir.."\n")
 	-- An ASCII separator
-	search_view.Buf.EventHandler:Insert(buffer.Loc(0, 1), string.rep("#", search_view:GetView().Width-2) .. "\n")
+	search_view.Buf.EventHandler:Insert(buffer.Loc(0, 1), string.rep("#", search_view:GetView().Width-4) .. "\n")
 	-- The ".." and use a newline if there are things in the current dir
 	--search_view.Buf.EventHandler:Insert(buffer.Loc(0, 2), (#search_result > 0 and "..\n" or ".."))
 
@@ -112,11 +184,11 @@ function display_grepsearch(search_result, searchterm, grep_result)
 		ii = ii + 1
 		local res = search_result[i]
 		local space = ""
-		display_content = res.line .. '.: ' .. res.text
+		display_content = res.line .. ': ' .. res.text
 		if res.path ~= act_file then
 			act_file = res.path
 			--space = res.path
-			display_content = '\n## ' .. res.path .. ':\n' .. display_content
+			display_content = '\n/' .. res.path .. ':\n' .. display_content
 			search_mapping_lines[ii+1]=search_result[i]
 			ii = ii +2
 		end
@@ -125,16 +197,26 @@ function display_grepsearch(search_result, searchterm, grep_result)
 		if i < #search_result then
 			display_content = display_content .. "\n"
 		end
+		
 
 		-- Insert line-by-line to avoid out-of-bounds on big folders
 		-- +2 so we skip the 0/1/2 positions that hold the top dir/separator/..
 		search_view.Buf.EventHandler:Insert(buffer.Loc(0, ii), display_content)
 		search_mapping_lines[ii]=search_result[i]
 	end
-	
-	if grep_result ~= nil then 
-		search_view.Buf.EventHandler:Insert(buffer.Loc(0, 20), grep_result)
-		return
+
+	-- debug:
+	-- if grep_result ~= nil then
+		-- search_view.Buf.EventHandler:Insert(buffer.Loc(0, 20), grep_result)
+		-- return
+	-- end
+
+	if show_filter then			
+			search_view.Buf.EventHandler:Insert(buffer.Loc(#display_content+1, ii), "\n")
+			ii=ii+1
+			local filtertext, endline = display_filter(ii)
+			search_view.Buf.EventHandler:Insert(buffer.Loc(0, ii), filtertext)
+			ii=endline
 	end
 	--search_view.Buf.EventHandler:Insert(buffer.Loc(0,10), grep_result)
 
@@ -146,12 +228,12 @@ end
 -- open_tree setup's the view
 local function open_tree()
 	-- Open a new Vsplit (on the very left)
-	micro.CurPane():VSplitIndex(buffer.NewBuffer("", "grepsearch"), false)
+	micro.CurPane():VSplitIndex(buffer.NewBuffer("", "grepsearchview"), false)
 	-- Save the new view so we can access it later
 	search_view = micro.CurPane()
 
 	-- Set the width of search_view to 30% & lock it
-    search_view:ResizePane(50)
+    search_view:ResizePane(55)
 	-- Set the type to unsavable
     -- search_view.Buf.Type = buffer.BTLog
     search_view.Buf.Type.Scratch = true
@@ -169,6 +251,7 @@ local function open_tree()
     search_view.Buf:SetOptionNative("statusformatr", "")
     search_view.Buf:SetOptionNative("statusformatl", "search result")
     search_view.Buf:SetOptionNative("scrollbar", false)
+    search_view.Buf:SetOptionNative("filetype","grepsearch")
 
 	-- Fill the search_result, and then print its contents to search_view
 	-- update_current_dir(os.Getwd())
@@ -220,6 +303,7 @@ local function try_open()
 		--search_target.GotoLoc(0,y)
 	else 
 		micro.InfoBar():Error("grepsearch failed")
+		return false
 	end
 	-- Resizes all views after opening a file
 	-- tabs[curTab + 1]:Resize()
@@ -232,10 +316,43 @@ function onQuit(bp)
 	end
 end
 
+local function is_inside_git()
+	local test_git = string.sub(shell.RunCommand('git rev-parse --is-inside-work-tree'),1,4)
+	local is_git = (string.sub(test_git,1,4) == 'true')
+--	micro.TermError('inside git?',272,'>>'..test_git..'<<'..boolstring(inside_git))
+	return is_git	
+end
+
+local function set_current_dir()
+	local cd = os.Getwd()
+	local pos = string.find(cd, "/")
+	if pos == nil then
+		return
+	end
+	local nextpos = string.find(cd,"/",pos+1)
+	while nextpos ~= nil do
+		pos=nextpos
+		nextpos = string.find(cd,"/",pos+1)
+	end
+	current_dir = string.sub(cd, pos)
+end
 
 function init()
+	inside_git = is_inside_git()
+	set_current_dir()
 	config.MakeCommand("grepsearch", grep_search, config.NoComplete)
 	config.AddRuntimeFile("grepsearch",config.RTHelp, "help/grepsearch.md")
+	config.AddRuntimeFile("grepsearch", config.RTSyntax, "syntax.yaml")
+	-- Let the user decide to include .git-directory:
+    config.RegisterCommonOption("grepsearch", "searchdotgit", false)
+    includegit = config.GetGlobalOption("grepsearch.searchdotgit")
+	-- Let the user decide to search inside dot-files
+    config.RegisterCommonOption("grepsearch", "searchdotfiles", true)
+    include_dots = config.GetGlobalOption("grepsearch.searchdotfiles")
+    -- Let the user decide to use git grep respecting .gitignore-file to exclude from grep-search
+    config.RegisterCommonOption("grepsearch", "searchgitrepository", true)
+    use_git = config.GetGlobalOption("grepsearch.searchgitrepository")
+    
 	--micro.Log('test')
 end
 
@@ -280,6 +397,10 @@ local function clearselection_if_tree(view)
 	end
 end
 
+function boolstring(bol)
+	if bol then return "true" else return "false" end
+end
+
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 -- All the events for certain Micro keys go below here
 -- Other than things we flat-out fail
@@ -308,6 +429,7 @@ function onCursorDown(view)
 	selectline_if_tree(view)
 end
 
+-- exclude all keystrokes on search result pane:
 function preRune(view, r)
 	if view ~= search_view then 
 		return true 
@@ -315,9 +437,13 @@ function preRune(view, r)
 	return false
 end
 
+-- handle enter on search result
 function preInsertNewline(view)
     if view == search_view then
-    	try_open()
+    	local openedfile = try_open()
+    	if not openedfile then 
+			
+    	end
         return false
     end
     return true

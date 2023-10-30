@@ -1,11 +1,17 @@
 # grepsearch for micro
-A plugin for the micro text editor. Enables to search recursive with grep inside current folder (and subfolders)
+a plugin for the blazingly fast [micro editor](https://micro-editor.github.io)
+
+Enables to search recursive with grep inside current folder (and subfolders)
 
 ## Installation
 
-clone this repository inside your micro-plugin directory (for example `$HOME/.config/micro/plug/`)
+for now clone this repository inside your micro-plugin directory (for example `$HOME/.config/micro/plug/`)
+
+tested with micro v. 2.0.8 and 2.0.10
 
 ## Usage
+open micro inside directory you want to search with.
+grepsearch will use this directory as base-folder for its search.
 
 open micro-terminal (ctrl + e) and type grepsearch and what you want to search for:
 

@@ -1,0 +1,12 @@
+filetype: grepsearch
+
+detect:
+    filename: "^grepsearchview$"
+
+rules:
+    - special: "^#.*$"
+    - todo: "^/.*$"
+    - constant: "^[0-9]+:"
+    - symbol: "⇛.*⇚"
+    - diff-added: "true"
+    - error: "false"

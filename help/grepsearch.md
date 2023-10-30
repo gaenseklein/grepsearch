@@ -1,5 +1,5 @@
 # grepsearch for micro
-A plugin for the micro text editor. Enables to search recursive with grep inside current folder (and subfolders)
+Enables to search recursive with grep inside current folder (and subfolders)
 
 ## Usage
 
@@ -14,4 +14,4 @@ it opens up a pane with the search-result. you can use up- and down-arrow to sel
 at first it will split the current pane verticaly and opens the file in this pane,
 once a pane is opened grepsearch will reuse this pane to open selected entrys afterwards.
 
-close search-pane with `ctrl-q`
+close search-pane with `ctrl-q` or `Escape`
