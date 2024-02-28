@@ -294,7 +294,7 @@ local function open_tree()
 end
 
 -- close_tree will close the tree plugin view and release memory.
-local function close_tree()
+function close_tree()
 	if search_view ~= nil then
 		search_view:Quit()
 		search_view = nil
