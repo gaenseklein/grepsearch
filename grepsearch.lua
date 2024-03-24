@@ -1,4 +1,4 @@
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 local micro = import("micro")
 local config = import("micro/config")
@@ -19,8 +19,8 @@ local target_pane
 local current_dir = ""
 
 local inside_git = false 
-local searchsymstart = "⇛"
-local searchsymend = "⇚"
+local searchsymstart ="" -- "⇛" -- we dont need that and use search highlight instead
+local searchsymend =""-- "⇚"
 
 
 -- constructs a new search entry
@@ -81,7 +81,7 @@ local function grep_exec(searchterm)
 --	micro.TermError("runCommand",56,runCommand ..' << usegit:'.. boolstring(use_git) .. 'inside_git' .. boolstring(inside_git))
 	-- run the command
 	-- TODO: as it can endure a while we should give visual feedback maybe that we are still searching?
-	micro.InfoBar():Message('grepsearch command:' .. runCommand)
+	micro.InfoBar():Message('grepsearch command:' .. runCommand .. ' running...')
 	local grep_result, grep_error = shell.RunCommand(runCommand)	
 	return grep_result
 end
@@ -258,6 +258,9 @@ function display_grepsearch(search_result, searchterm, grep_result)
     search_view:Tab():Resize()
     -- go to first search entry
 	search_view:GotoCmd({"4"})
+	search_view.Buf.LastSearch = searchterm
+	search_view.Buf.LastSearchRegex = false
+	search_view.Buf.HighlightSearch = true
 
 end
 
@@ -294,7 +297,7 @@ local function open_tree()
 end
 
 -- close_tree will close the tree plugin view and release memory.
-local function close_tree()
+function close_tree()
 	if search_view ~= nil then
 		search_view:Quit()
 		search_view = nil
