@@ -1,4 +1,4 @@
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 local micro = import("micro")
 local config = import("micro/config")
@@ -26,7 +26,8 @@ local searchsymend =""-- "⇚"
 -- constructs a new search entry
 -- filepath, linenr, linetext, searchterm: string
 local function new_search_entry(filepath, linenr, linetext, searchterm)
-	local pos = string.find(linetext,searchterm)
+	-- micro.TermError("params:",29,'grepsearch new_search_entry params:' .. filepath .."linenr"..linenr .. "linetext" .. linetext .."searchterm"..searchterm)
+	local pos = string.find(linetext,searchterm, 1, true)	
 	local max = search_view:GetView().Width - #linenr - 4 --4 is for ': ' and the 2 markers 
 	--local length = string.len(linetext)
 	-- lets shorten the text as grep can produce very big results
@@ -39,7 +40,10 @@ local function new_search_entry(filepath, linenr, linetext, searchterm)
 		firstl = string.sub(text,1,1)
 		cutted = cutted + 1
 	end	
+
 	-- cutting from left to search term to make searchterm visible:
+	-- log({pos=pos, cutted=cutted, max=max, searchterm=searchterm})
+	if pos == nil then pos = 0 end
 	if pos - cutted > max - #searchterm - 2 then 
 		--local cuttedpos = pos - cutted 
 		local cutpos = (pos - cutted - max) + ((max - max % 2) / 2)
@@ -49,8 +53,12 @@ local function new_search_entry(filepath, linenr, linetext, searchterm)
 	if #text > max*10 then
 		text = string.sub(text, 1, max*10) .. '(...)'
 	end
-	local sstart, ssend = string.find(text,searchterm)
-	text = string.sub(text,1,sstart-1)..searchsymstart..searchterm..searchsymend..string.sub(text,ssend+1)
+	local sstart, ssend = string.find(text,searchterm, 1, true)
+	if sstart == nil or ssend == nil then
+		-- text = text .. " //searchterm:"..searchterm
+	else
+		text = string.sub(text,1,sstart-1)..searchsymstart..searchterm..searchsymend..string.sub(text,ssend+1)
+	end
 	return {
 		path = filepath,
 		line = linenr,
@@ -258,9 +266,9 @@ function display_grepsearch(search_result, searchterm, grep_result)
     search_view:Tab():Resize()
     -- go to first search entry
 	search_view:GotoCmd({"4"})
-	search_view.Buf.LastSearch = searchterm
-	search_view.Buf.LastSearchRegex = false
-	search_view.Buf.HighlightSearch = true
+	-- search_view.Buf.LastSearch = searchterm
+	-- search_view.Buf.LastSearchRegex = false
+	-- search_view.Buf.HighlightSearch = true
 
 end
 
@@ -494,4 +502,14 @@ function preInsertNewline(view)
         return false
     end
     return true
+end
+
+function log(obj)
+	local str = ""
+	for k, v in pairs(obj) do
+		str = str .. k .. ':'
+		if v == nil then str = str .. "nil" else str = str .. v end
+		str = str .. "\n"
+	end	
+	micro.TermError("log",0,str)
 end
